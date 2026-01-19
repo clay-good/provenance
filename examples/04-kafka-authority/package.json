@@ -1,0 +1,16 @@
+{
+  "name": "kafka-authority-demo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PIC Kafka Authority Demo - Message-level authority with PCA in headers",
+  "type": "module",
+  "workspaces": [
+    "producer",
+    "consumer",
+    "broker-simulator"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "demo": "bash demo.sh"
+  }
+}

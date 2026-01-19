@@ -1,0 +1,30 @@
+# Trust Plane Standalone Docker Compose
+#
+# Runs only the Trust Plane server for development and testing.
+#
+# Usage:
+#   docker-compose -f docker-compose.standalone.yml up
+#
+# Test endpoints:
+#   curl http://localhost:8080/health
+#   curl http://localhost:8080/ready
+
+version: '3.8'
+
+services:
+  trust-plane:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - TRUST_PLANE_PORT=8080
+      - TRUST_PLANE_LOG_LEVEL=debug
+      - TRUST_PLANE_CAT_KID=standalone-trust-plane
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

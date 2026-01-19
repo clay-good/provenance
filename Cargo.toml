@@ -1,0 +1,55 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/provenance-core",
+    "crates/provenance-plane",
+    "crates/provenance-bridge",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/clay-good/provenance"
+description = "PIC-compliant federated trust framework"
+keywords = ["pic", "authorization", "trust", "provenance", "security"]
+categories = ["authentication", "cryptography"]
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.44", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Cryptography
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+coset = "0.3"
+rand = "0.8"
+sha2 = "0.10"
+base64 = "0.22"
+
+# Web framework
+axum = "0.8"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+
+# Logging and tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Testing
+proptest = "1.5"
+
+# Internal crates
+provenance-core = { path = "crates/provenance-core" }
+provenance-plane = { path = "crates/provenance-plane" }
+provenance-bridge = { path = "crates/provenance-bridge" }

@@ -1,0 +1,103 @@
+# Trust Plane Docker Compose Configuration
+#
+# This provides a complete demo environment for the PIC Trust Plane
+# including the Trust Plane server and AI Agent insurance demo services.
+#
+# Usage:
+#   docker-compose up          # Start all services
+#   docker-compose up -d       # Start in detached mode
+#   docker-compose logs -f     # Follow logs
+#   docker-compose down        # Stop and remove containers
+#
+# Services:
+#   - trust-plane: Core CAT service (port 8080)
+#   - gateway: Federation entry point (port 3000)
+#   - agent: AI agent service (internal)
+#   - claims: Claims storage backend (port 3001)
+
+version: '3.8'
+
+services:
+  # ===========================================================================
+  # Trust Plane - CAT (Causal Authority Transition) Service
+  # ===========================================================================
+  trust-plane:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - TRUST_PLANE_PORT=8080
+      - TRUST_PLANE_LOG_LEVEL=info
+      - TRUST_PLANE_CAT_KID=demo-trust-plane
+    networks:
+      - pic-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ===========================================================================
+  # Gateway - Federation Entry Point
+  # ===========================================================================
+  # Receives user credentials, issues PCA_0, routes requests
+  gateway:
+    build: ../../examples/02-ai-agent-insurance/gateway
+    ports:
+      - "3000:3000"
+    environment:
+      - TRUST_PLANE_URL=http://trust-plane:8080
+      - PORT=3000
+      - LOG_LEVEL=debug
+    depends_on:
+      trust-plane:
+        condition: service_healthy
+    networks:
+      - pic-network
+
+  # ===========================================================================
+  # AI Agent - Processes user requests
+  # ===========================================================================
+  # Demonstrates confused deputy protection
+  agent:
+    build: ../../examples/02-ai-agent-insurance/agent
+    environment:
+      - TRUST_PLANE_URL=http://trust-plane:8080
+      - CLAIMS_SERVICE_URL=http://claims:3001
+      - LOG_LEVEL=debug
+    depends_on:
+      trust-plane:
+        condition: service_healthy
+      claims:
+        condition: service_started
+    networks:
+      - pic-network
+
+  # ===========================================================================
+  # Claims Service - Backend storage
+  # ===========================================================================
+  # Validates PCA before returning claims data
+  claims:
+    build: ../../examples/02-ai-agent-insurance/services
+    ports:
+      - "3001:3001"
+    environment:
+      - TRUST_PLANE_URL=http://trust-plane:8080
+      - PORT=3001
+      - LOG_LEVEL=debug
+    depends_on:
+      trust-plane:
+        condition: service_healthy
+    networks:
+      - pic-network
+
+networks:
+  pic-network:
+    driver: bridge
+
+volumes:
+  trust-plane-keys:
+    driver: local

@@ -1,0 +1,28 @@
+{
+  "name": "ai-agent-insurance-demo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PIC AI Agent Demo - Confused Deputy Prevention for Insurance Claims",
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:gateway && npm run build:claims && npm run build:agent",
+    "build:gateway": "cd gateway && npm run build",
+    "build:claims": "cd claims-service && npm run build",
+    "build:agent": "cd agent && npm run build",
+    "start": "npm run start:trust-plane & npm run start:claims & npm run start:gateway & npm run start:agent",
+    "start:trust-plane": "cd ../../crates/provenance-plane && cargo run",
+    "start:gateway": "cd gateway && npm start",
+    "start:claims": "cd claims-service && npm start",
+    "start:agent": "cd agent && npm start",
+    "demo": "bash demo.sh",
+    "install:all": "npm install && cd gateway && npm install && cd ../claims-service && npm install && cd ../agent && npm install"
+  },
+  "workspaces": [
+    "gateway",
+    "claims-service",
+    "agent"
+  ],
+  "devDependencies": {
+    "concurrently": "^8.2.0"
+  }
+}

@@ -1,0 +1,40 @@
+[package]
+name = "provenance-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Federation bridge for external credential translation"
+
+[dependencies]
+provenance-core = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true }
+async-trait = "0.1"
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+base64 = { workspace = true }
+
+# HTTP client for JWKS fetching
+reqwest = { version = "0.12", features = ["json"] }
+
+# JWT handling
+jsonwebtoken = "9"
+
+# Error handling
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Time
+chrono = { workspace = true }
+
+# Caching
+moka = { version = "0.12", features = ["future"] }
+
+[dev-dependencies]
+tokio = { workspace = true }
