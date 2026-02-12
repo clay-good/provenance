@@ -177,15 +177,123 @@ fn validate_credential(
     }
 }
 
-/// Validate a JWT credential (simplified for now)
+/// Validate a JWT credential
+///
+/// Decodes the JWT payload to extract the principal and PIC operations.
+/// Supports OAuth Token Exchange (RFC 8693): when an `act` claim is present,
+/// traverses the actor chain to find the deepest subject (the original user)
+/// and uses that as p_0.
+///
+/// Note: In production, signature verification against the issuer's JWKS
+/// would be performed here via the Federation Bridge. For this demo,
+/// we trust the JWT payload since Keycloak is running locally.
 fn validate_jwt_credential(
-    _credential: &str,
+    credential: &str,
 ) -> Result<(PrincipalIdentifier, Vec<String>, Option<String>), ApiError> {
-    // TODO: Implement proper JWT validation via Federation Bridge
-    // For now, we reject JWT credentials as not yet implemented
-    Err(ApiError::BadRequest(
-        "JWT validation not yet implemented - use 'mock' credential type for testing".into(),
-    ))
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use serde_json::Value;
+
+    // Decode JWT payload (second segment)
+    let parts: Vec<&str> = credential.split('.').collect();
+    if parts.len() != 3 {
+        return Err(ApiError::InvalidCredential("Invalid JWT format".into()));
+    }
+
+    let payload_bytes = URL_SAFE_NO_PAD.decode(parts[1]).map_err(|e| {
+        ApiError::InvalidCredential(format!("Invalid JWT payload encoding: {}", e))
+    })?;
+
+    let claims: Value = serde_json::from_slice(&payload_bytes).map_err(|e| {
+        ApiError::InvalidCredential(format!("Invalid JWT payload JSON: {}", e))
+    })?;
+
+    // Extract principal: check for act claim (RFC 8693 token exchange)
+    // If act.sub exists, traverse to deepest subject (original user)
+    // Otherwise, use top-level sub
+    let principal_value = if let Some(act) = claims.get("act") {
+        deepest_act_subject(act).unwrap_or_else(|| {
+            claims.get("sub")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string()
+        })
+    } else {
+        // No act claim — use preferred_username if available, else sub
+        claims.get("preferred_username")
+            .and_then(|v| v.as_str())
+            .or_else(|| claims.get("sub").and_then(|v| v.as_str()))
+            .unwrap_or("unknown")
+            .to_string()
+    };
+
+    let issuer = claims.get("iss")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+
+    let principal = PrincipalIdentifier::new(
+        PrincipalType::Oidc,
+        format!("{}#{}", issuer, principal_value),
+    );
+
+    // Extract PIC operations from pic_ops claim
+    let allowed_ops = if let Some(pic_ops) = claims.get("pic_ops") {
+        match pic_ops {
+            Value::Array(arr) => arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect(),
+            Value::String(s) => vec![s.clone()],
+            _ => vec![],
+        }
+    } else if let Some(scope) = claims.get("scope").and_then(|v| v.as_str()) {
+        // Fallback: extract PIC-like operations from scope claim
+        scope.split_whitespace()
+            .filter(|s| s.contains(':'))
+            .map(String::from)
+            .collect()
+    } else {
+        vec![]
+    };
+
+    if allowed_ops.is_empty() {
+        return Err(ApiError::Forbidden(
+            "JWT contains no PIC operations (pic_ops claim missing or empty)".into(),
+        ));
+    }
+
+    // Extract expiration
+    let exp = claims.get("exp")
+        .and_then(|v| v.as_i64())
+        .map(|ts| {
+            chrono::DateTime::from_timestamp(ts, 0)
+                .map(|dt| dt.to_rfc3339())
+                .unwrap_or_default()
+        });
+
+    info!(
+        principal = %principal.value,
+        ops = ?allowed_ops,
+        issuer = %issuer,
+        "Validated JWT credential"
+    );
+
+    Ok((principal, allowed_ops, exp))
+}
+
+/// Traverse the RFC 8693 `act` claim chain to find the deepest subject
+fn deepest_act_subject(act: &serde_json::Value) -> Option<String> {
+    let obj = act.as_object()?;
+
+    // If there's a nested act, go deeper first
+    if let Some(nested_act) = obj.get("act") {
+        if let Some(deeper) = deepest_act_subject(nested_act) {
+            return Some(deeper);
+        }
+    }
+
+    // Return this level's sub
+    obj.get("sub")
+        .and_then(|v| v.as_str())
+        .map(String::from)
 }
 
 /// Validate an API key credential (simplified for now)
@@ -209,11 +317,7 @@ fn validate_mock_credential(
     credential: &str,
 ) -> Result<(PrincipalIdentifier, Vec<String>, Option<String>), ApiError> {
     // Handle "mock:principal" format (sent by gateway with Bearer mock:alice)
-    let credential = if credential.starts_with("mock:") {
-        &credential[5..]
-    } else {
-        credential
-    };
+    let credential = credential.strip_prefix("mock:").unwrap_or(credential);
 
     // Now parse "principal" or "principal:ops"
     // Be careful: ops can contain colons (e.g., "read:claims:*")
@@ -346,5 +450,235 @@ mod tests {
             validate_mock_credential("mock:charlie:read:claims:*").unwrap();
         assert_eq!(principal.value, "mock:charlie");
         assert_eq!(ops, vec!["read:claims:*"]);
+    }
+
+    // =========================================================================
+    // JWT Credential Tests
+    // =========================================================================
+
+    /// Build a mock JWT from a JSON claims payload (no real signature, just
+    /// base64url-encoded header.payload.signature for testing).
+    fn build_mock_jwt(claims: &serde_json::Value) -> String {
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        use base64::Engine;
+
+        let header = serde_json::json!({
+            "alg": "RS256",
+            "typ": "JWT",
+            "kid": "test-key-1"
+        });
+        let header_b64 = URL_SAFE_NO_PAD.encode(header.to_string().as_bytes());
+        let payload_b64 = URL_SAFE_NO_PAD.encode(claims.to_string().as_bytes());
+        let sig_b64 = URL_SAFE_NO_PAD.encode(b"fake-signature-for-testing");
+
+        format!("{}.{}.{}", header_b64, payload_b64, sig_b64)
+    }
+
+    #[test]
+    fn test_jwt_credential_standard_keycloak_token() {
+        // Simulates a Keycloak token with pic_ops and preferred_username
+        let claims = serde_json::json!({
+            "iss": "http://localhost:8180/realms/pic-demo",
+            "sub": "665c3afa-3de7-45d2-a0bb-e7197cfff381",
+            "preferred_username": "alice",
+            "aud": "pic-resource-api",
+            "pic_ops": ["read:claims:alice/*"],
+            "exp": 9999999999_i64,
+            "scope": "openid pic-operations"
+        });
+        let jwt = build_mock_jwt(&claims);
+
+        let (principal, ops, exp) = validate_jwt_credential(&jwt).unwrap();
+
+        // p_0 should use preferred_username (alice), not the UUID sub
+        assert_eq!(
+            principal.value,
+            "http://localhost:8180/realms/pic-demo#alice"
+        );
+        assert_eq!(principal.principal_type, PrincipalType::Oidc);
+        assert_eq!(ops, vec!["read:claims:alice/*"]);
+        assert!(exp.is_some());
+    }
+
+    #[test]
+    fn test_jwt_credential_with_act_claim_preserves_original_subject() {
+        // Simulates a token-exchanged JWT (RFC 8693) where the gateway service
+        // account is the subject, and the original user is in the act chain
+        let claims = serde_json::json!({
+            "iss": "http://localhost:8180/realms/pic-demo",
+            "sub": "service-account-pic-gateway",
+            "act": {
+                "sub": "alice-user-id-12345"
+            },
+            "pic_ops": ["read:claims:alice/*"],
+            "exp": 9999999999_i64
+        });
+        let jwt = build_mock_jwt(&claims);
+
+        let (principal, ops, _exp) = validate_jwt_credential(&jwt).unwrap();
+
+        // p_0 should be the ORIGINAL user from act.sub, not the service account
+        assert_eq!(
+            principal.value,
+            "http://localhost:8180/realms/pic-demo#alice-user-id-12345"
+        );
+        assert_eq!(ops, vec!["read:claims:alice/*"]);
+    }
+
+    #[test]
+    fn test_jwt_credential_with_nested_act_chain() {
+        // Multi-level delegation: service-B → service-A → alice
+        let claims = serde_json::json!({
+            "iss": "https://keycloak.example.com/realms/demo",
+            "sub": "service-B",
+            "act": {
+                "sub": "service-A",
+                "act": {
+                    "sub": "alice"
+                }
+            },
+            "pic_ops": ["read:claims:alice/*"],
+            "exp": 9999999999_i64
+        });
+        let jwt = build_mock_jwt(&claims);
+
+        let (principal, _ops, _exp) = validate_jwt_credential(&jwt).unwrap();
+
+        // p_0 should be the DEEPEST subject (the original human user)
+        assert_eq!(
+            principal.value,
+            "https://keycloak.example.com/realms/demo#alice"
+        );
+    }
+
+    #[test]
+    fn test_jwt_credential_no_pic_ops_rejected() {
+        // JWT without pic_ops claim and no PIC-like scopes should be rejected
+        let claims = serde_json::json!({
+            "iss": "http://localhost:8180/realms/pic-demo",
+            "sub": "alice",
+            "exp": 9999999999_i64,
+            "scope": "openid profile email"
+        });
+        let jwt = build_mock_jwt(&claims);
+
+        let result = validate_jwt_credential(&jwt);
+        assert!(result.is_err(), "JWT without PIC operations must be rejected");
+    }
+
+    #[test]
+    fn test_jwt_credential_fallback_to_sub_when_no_preferred_username() {
+        // When preferred_username is absent, should use sub
+        let claims = serde_json::json!({
+            "iss": "http://localhost:8180/realms/pic-demo",
+            "sub": "665c3afa-3de7-45d2-a0bb-e7197cfff381",
+            "pic_ops": ["read:claims:alice/*"],
+            "exp": 9999999999_i64
+        });
+        let jwt = build_mock_jwt(&claims);
+
+        let (principal, _ops, _exp) = validate_jwt_credential(&jwt).unwrap();
+
+        assert_eq!(
+            principal.value,
+            "http://localhost:8180/realms/pic-demo#665c3afa-3de7-45d2-a0bb-e7197cfff381"
+        );
+    }
+
+    #[test]
+    fn test_jwt_credential_pic_ops_as_single_string() {
+        // pic_ops as a single string instead of array
+        let claims = serde_json::json!({
+            "iss": "http://localhost:8180/realms/pic-demo",
+            "sub": "alice",
+            "pic_ops": "read:claims:alice/*",
+            "exp": 9999999999_i64
+        });
+        let jwt = build_mock_jwt(&claims);
+
+        let (principal, ops, _exp) = validate_jwt_credential(&jwt).unwrap();
+
+        assert_eq!(principal.value, "http://localhost:8180/realms/pic-demo#alice");
+        assert_eq!(ops, vec!["read:claims:alice/*"]);
+    }
+
+    #[test]
+    fn test_jwt_credential_scope_fallback_extracts_pic_ops() {
+        // When pic_ops is absent but scope contains PIC-like operations
+        let claims = serde_json::json!({
+            "iss": "http://localhost:8180/realms/pic-demo",
+            "sub": "alice",
+            "exp": 9999999999_i64,
+            "scope": "openid read:claims:alice/* profile"
+        });
+        let jwt = build_mock_jwt(&claims);
+
+        let (principal, ops, _exp) = validate_jwt_credential(&jwt).unwrap();
+
+        assert_eq!(principal.value, "http://localhost:8180/realms/pic-demo#alice");
+        // Only the PIC-like scope entry (with colon) should be extracted
+        assert_eq!(ops, vec!["read:claims:alice/*"]);
+    }
+
+    #[test]
+    fn test_jwt_credential_invalid_format_rejected() {
+        let result = validate_jwt_credential("not-a-jwt");
+        assert!(result.is_err());
+
+        let result = validate_jwt_credential("header.payload");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_jwt_credential_multiple_pic_ops() {
+        let claims = serde_json::json!({
+            "iss": "http://localhost:8180/realms/pic-demo",
+            "sub": "alice",
+            "pic_ops": ["read:claims:alice/*", "write:claims:alice/*"],
+            "exp": 9999999999_i64
+        });
+        let jwt = build_mock_jwt(&claims);
+
+        let (_principal, ops, _exp) = validate_jwt_credential(&jwt).unwrap();
+
+        assert_eq!(ops.len(), 2);
+        assert!(ops.contains(&"read:claims:alice/*".to_string()));
+        assert!(ops.contains(&"write:claims:alice/*".to_string()));
+    }
+
+    #[test]
+    fn test_deepest_act_subject_single_level() {
+        let act = serde_json::json!({"sub": "alice"});
+        assert_eq!(deepest_act_subject(&act), Some("alice".to_string()));
+    }
+
+    #[test]
+    fn test_deepest_act_subject_nested() {
+        let act = serde_json::json!({
+            "sub": "service-a",
+            "act": {"sub": "alice"}
+        });
+        assert_eq!(deepest_act_subject(&act), Some("alice".to_string()));
+    }
+
+    #[test]
+    fn test_deepest_act_subject_deeply_nested() {
+        let act = serde_json::json!({
+            "sub": "service-c",
+            "act": {
+                "sub": "service-b",
+                "act": {
+                    "sub": "service-a",
+                    "act": {"sub": "alice"}
+                }
+            }
+        });
+        assert_eq!(deepest_act_subject(&act), Some("alice".to_string()));
+    }
+
+    #[test]
+    fn test_deepest_act_subject_no_sub() {
+        let act = serde_json::json!({"foo": "bar"});
+        assert_eq!(deepest_act_subject(&act), None);
     }
 }

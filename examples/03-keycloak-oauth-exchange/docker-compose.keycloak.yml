@@ -1,0 +1,121 @@
+# Keycloak OAuth Token Exchange + PIC Demo
+#
+# Complete environment for demonstrating PIC authority continuity through
+# OAuth Token Exchange (RFC 8693) using Keycloak as the Authorization Server.
+#
+# Usage:
+#   docker-compose -f docker-compose.keycloak.yml up          # Start all services
+#   docker-compose -f docker-compose.keycloak.yml up -d       # Start in detached mode
+#   docker-compose -f docker-compose.keycloak.yml logs -f     # Follow logs
+#   docker-compose -f docker-compose.keycloak.yml down        # Stop and remove containers
+#
+# Services:
+#   - keycloak:           OAuth Authorization Server (port 8180)
+#   - trust-plane:        Core CAT service (port 8080)
+#   - keycloak-gateway:   OAuth Token Exchange entry point (port 3000)
+#   - resource-api:       PCA-protected resource server (port 3001)
+#
+# Architecture:
+#   User -> Keycloak (authn) -> Gateway (token exchange) -> Trust Plane (PCA_0) -> Resource API
+
+services:
+  # ===========================================================================
+  # Keycloak - OAuth 2.0 Authorization Server
+  # ===========================================================================
+  # Runs in dev mode with Token Exchange feature enabled.
+  # Pre-loaded with the "pic-demo" realm containing users, clients, and scopes
+  # that map directly to PIC operation strings.
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    command:
+      - start-dev
+      - --import-realm
+      - --features=token-exchange,admin-fine-grained-authz
+    ports:
+      - "8180:8080"
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    networks:
+      - pic-network
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '200\\|UP'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # ===========================================================================
+  # Trust Plane - CAT (Causal Authority Transition) Service
+  # ===========================================================================
+  trust-plane:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - TRUST_PLANE_PORT=8080
+      - TRUST_PLANE_LOG_LEVEL=info
+      - TRUST_PLANE_CAT_KID=demo-trust-plane
+    networks:
+      - pic-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ===========================================================================
+  # Keycloak Gateway - OAuth Token Exchange + PCA_0 Issuance
+  # ===========================================================================
+  # Accepts Bearer tokens, performs OAuth Token Exchange with Keycloak,
+  # then translates the exchanged token into PCA_0 via the Trust Plane.
+  keycloak-gateway:
+    build:
+      context: ../..
+      dockerfile: examples/03-keycloak-oauth-exchange/keycloak-gateway/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - TRUST_PLANE_URL=http://trust-plane:8080
+      - KEYCLOAK_URL=http://keycloak:8080
+      - RESOURCE_API_URL=http://resource-api:3001
+      - LOG_LEVEL=debug
+    depends_on:
+      trust-plane:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    networks:
+      - pic-network
+
+  # ===========================================================================
+  # Resource API - PCA-Protected Resource Server
+  # ===========================================================================
+  # Validates PCA before returning claims data. This is the final enforcement
+  # point — even if all upstream services are compromised, authority is verified
+  # against the cryptographic PCA chain.
+  resource-api:
+    build:
+      context: ../..
+      dockerfile: examples/03-keycloak-oauth-exchange/resource-api/Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - TRUST_PLANE_URL=http://trust-plane:8080
+      - LOG_LEVEL=debug
+    depends_on:
+      trust-plane:
+        condition: service_healthy
+    networks:
+      - pic-network
+
+networks:
+  pic-network:
+    driver: bridge

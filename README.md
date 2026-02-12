@@ -204,7 +204,7 @@ curl http://localhost:8080/ready
 
 ## Demo It! (Prove the Value)
 
-We provide three working demos to prove PIC's value. Each demonstrates confused deputy prevention in different architectures.
+We provide five working demos to prove PIC's value. Each demonstrates confused deputy prevention in different architectures.
 
 ### Demo 1: AI Agent (Insurance Claims) - **Primary Demo**
 
@@ -252,7 +252,28 @@ PCA_2:       ops=[write:storage:*]                   ← NARROWED AGAIN
 
 Even if Archive is compromised, it CANNOT give Storage extra permissions.
 
-### Demo 3: Kafka Message Authority
+### Demo 3: Keycloak OAuth Token Exchange (RFC 8693)
+
+Extends OAuth Token Exchange with PIC authority continuity. Shows how Keycloak tokens map to PCA operations and how provenance is preserved through token exchange flows — similar to how WIMSE extended OAuth for workload identity.
+
+```bash
+cd examples/03-keycloak-oauth-exchange
+./demo.sh
+```
+
+**Requires Docker** (for Keycloak).
+
+**What it shows:**
+| Scenario | Action | Result |
+|----------|--------|--------|
+| Normal flow | Alice accesses her own claim | ✓ SUCCESS - PCA chain with p_0=alice |
+| Provenance preserved | Inspect p_0 after token exchange | ✓ p_0=alice, not gateway service |
+| **Confused deputy** | Alice's token for Bob's claim | ✗ BLOCKED - `read:claims:bob/* ⊄ read:claims:alice/*` |
+| **Cross-user access** | Bob's token for Alice's claim | ✗ BLOCKED - `read:claims:alice/* ⊄ read:claims:bob/*` |
+
+**The key insight**: The RFC 8693 `act` claim naturally maps to PIC's provenance chain. After token exchange, `p_0` is still the original human user — token exchange cannot launder identity.
+
+### Demo 4: Kafka Message Authority
 
 Shows PCA embedded in Kafka message headers for end-to-end authority.
 
@@ -267,10 +288,10 @@ cd examples/04-kafka-authority
 - Messages without valid PCA are rejected
 - Unauthorized topic access is blocked
 
-### Demo 4: Federation 
+### Demo 5: Federation
 
 ```bash
-cd examples/05-federation 
+cd examples/05-federation
 ./demo.sh
 ```
 
@@ -367,7 +388,9 @@ Register executor public key.
 |---------|-------------|
 | `01-microservice-chain` | Gateway → Archive → Storage with authority narrowing |
 | `02-ai-agent-insurance` | AI agent confused deputy prevention |
+| `03-keycloak-oauth-exchange` | OAuth Token Exchange (RFC 8693) with PIC authority continuity via Keycloak |
 | `04-kafka-authority` | Kafka message authority with PCA headers |
+| `05-federation` | Cross-organization Trust Plane federation |
 
 ## Security Properties
 
@@ -401,7 +424,9 @@ provenance/
 ├── examples/
 │   ├── 01-microservice-chain/
 │   ├── 02-ai-agent-insurance/
-│   └── 04-kafka-authority/
+│   ├── 03-keycloak-oauth-exchange/
+│   ├── 04-kafka-authority/
+│   └── 05-federation/
 └── deploy/
     └── docker/               # Docker deployment
 ```
@@ -595,7 +620,7 @@ curl -X POST http://localhost:8080/v1/federation/discover \
 | Unknown CAT Rejection | PCAs from unregistered Trust Planes are rejected |
 | Cross-Org Authority | p_0 origin principal preserved across organization boundaries |
 
-### Demo 4: Federation (Cross-Organization)
+### Demo 5: Federation (Cross-Organization)
 
 ```bash
 cd examples/05-federation
@@ -692,6 +717,7 @@ The Federation Bridge can be extended with additional credential handlers:
 | Handler | Status | Description |
 |---------|--------|-------------|
 | JWT/OIDC | ✓ Implemented | Standard OAuth2/OIDC flows |
+| JWT Token Exchange | ✓ Implemented | RFC 8693 with `act` claim traversal and `pic_ops` extraction |
 | API Key | ✓ Implemented | MFA-validated API keys |
 | SPIFFE/SPIRE | Planned | Workload identity |
 | mTLS | Planned | Certificate-based identity |

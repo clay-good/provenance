@@ -1,0 +1,21 @@
+{
+  "name": "keycloak-oauth-exchange-demo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PIC Keycloak OAuth Token Exchange Demo - Authority continuity through OAuth Token Exchange (RFC 8693)",
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:keycloak-gateway && npm run build:resource-api",
+    "build:keycloak-gateway": "cd keycloak-gateway && npm run build",
+    "build:resource-api": "cd resource-api && npm run build",
+    "start": "npm run start:keycloak-gateway & npm run start:resource-api",
+    "start:keycloak-gateway": "cd keycloak-gateway && npm start",
+    "start:resource-api": "cd resource-api && npm start",
+    "demo": "bash demo.sh",
+    "install:all": "npm install && cd keycloak-gateway && npm install && cd ../resource-api && npm install"
+  },
+  "workspaces": [
+    "keycloak-gateway",
+    "resource-api"
+  ]
+}
