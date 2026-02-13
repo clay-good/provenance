@@ -5,7 +5,7 @@
 # Build: docker build -f deploy/docker/Dockerfile -t provenance-plane .
 # Run:   docker run -p 8080:8080 provenance-plane
 
-FROM rust:1.75 as builder
+FROM rust:1.85 AS builder
 
 WORKDIR /app
 
@@ -18,9 +18,9 @@ RUN cargo build --release -p provenance-plane
 # Runtime stage - minimal Debian image
 FROM debian:bookworm-slim
 
-# Install CA certificates for HTTPS connections (e.g., federation)
+# Install CA certificates for HTTPS connections and curl for health checks
 RUN apt-get update && \
-    apt-get install -y ca-certificates && \
+    apt-get install -y --no-install-recommends ca-certificates curl && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy the built binary

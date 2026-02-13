@@ -1,0 +1,148 @@
+{
+  "realm": "pic-test",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": false,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": false,
+  "attributes": {
+    "pic_enabled": "true",
+    "pic_trust_plane_url": "http://wiremock:8080",
+    "pic_trust_plane_timeout_ms": "3000",
+    "pic_fail_open": "false",
+    "pic_ops_user_attribute": "pic_ops",
+    "pic_audit_enabled": "true",
+    "pic_token_lifetime_seconds": "300",
+    "pic_max_act_depth": "32"
+  },
+  "roles": {
+    "realm": [
+      {
+        "name": "user",
+        "description": "User role"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "pic-gateway",
+      "name": "PIC Gateway",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "pic-gateway-secret",
+      "serviceAccountsEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "pic.enabled": "true",
+        "pic.executor.name": "pic-gateway"
+      },
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "pic-operations"
+      ]
+    },
+    {
+      "clientId": "pic-resource-api",
+      "name": "PIC Resource API",
+      "enabled": true,
+      "bearerOnly": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "pic.enabled": "true",
+        "pic.executor.name": "pic-resource-api"
+      }
+    },
+    {
+      "clientId": "non-pic-client",
+      "name": "Non-PIC Client",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "non-pic-secret",
+      "directAccessGrantsEnabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "attributes": {}
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "email": "alice@example.com",
+      "firstName": "Alice",
+      "lastName": "Smith",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "alice123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["user"],
+      "attributes": {
+        "pic_ops": ["read:claims:alice/*", "write:claims:alice/*"]
+      }
+    },
+    {
+      "username": "bob",
+      "enabled": true,
+      "email": "bob@example.com",
+      "firstName": "Bob",
+      "lastName": "Jones",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "bob123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["user"],
+      "attributes": {
+        "pic_ops": ["read:claims:bob/*"]
+      }
+    },
+    {
+      "username": "no-ops-user",
+      "enabled": true,
+      "email": "noops@example.com",
+      "firstName": "NoOps",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "noops123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["user"],
+      "attributes": {}
+    }
+  ],
+  "clientScopes": [
+    {
+      "name": "pic-operations",
+      "protocol": "openid-connect",
+      "protocolMappers": [
+        {
+          "name": "pic-ops-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "pic-ops-mapper",
+          "config": {
+            "user.attribute": "pic_ops",
+            "claim.name": "pic_ops",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ]
+}

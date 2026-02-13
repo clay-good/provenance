@@ -391,6 +391,7 @@ Register executor public key.
 | `03-keycloak-oauth-exchange` | OAuth Token Exchange (RFC 8693) with PIC authority continuity via Keycloak |
 | `04-kafka-authority` | Kafka message authority with PCA headers |
 | `05-federation` | Cross-organization Trust Plane federation |
+| `06-keycloak-pic-spi` | Server-side PIC via Keycloak SPI — RFC 8693 token exchange with embedded PIC claims |
 
 ## Security Properties
 
@@ -632,6 +633,28 @@ cd examples/05-federation
 - PCA from Trust Plane A can be verified by Trust Plane B
 - Services in different organizations can validate cross-org authority chains
 - Unknown or unregistered CATs are rejected
+
+### Demo 6: Keycloak PIC SPI (Server-Side PIC)
+
+```bash
+cd examples/06-keycloak-pic-spi
+./demo.sh
+```
+
+**Requires Docker** (for Keycloak + Trust Plane) and **Maven** (for SPI build).
+
+**What it shows:**
+
+| Scenario | Action | Result |
+|----------|--------|--------|
+| Normal flow | Alice token exchange with PIC token type | pic+jwt with embedded PIC claims |
+| Provenance | Inspect p_0 in pic_provenance | p_0 = alice (not service account) |
+| Scope narrowing | Exchange with narrowed scope | pic_ops narrowed to requested scope |
+| **Confused deputy** | Alice requests Bob's ops | **BLOCKED** — empty intersection |
+| Introspection | POST /realms/pic-demo/pic/introspect | active=true, p_0, pic_ops, chain_length |
+| Audit trail | Inspect pic_chain | hop=0, executor, pca_hash, cat_kid |
+
+**Key insight**: PIC works transparently at the IdP level. Standard OAuth clients get authority continuity without any code changes — the Keycloak SPI does everything.
 
 ### PermGuard Integration Point
 

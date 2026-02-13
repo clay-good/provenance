@@ -1,0 +1,36 @@
+services:
+  trust-plane:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      TRUST_PLANE_PORT: "8080"
+      TRUST_PLANE_LOG_LEVEL: "info"
+      TRUST_PLANE_CAT_KID: "demo-trust-plane"
+    networks:
+      - pic-spi-network
+
+  keycloak:
+    build:
+      context: ../../keycloak-pic-spi
+      dockerfile: Dockerfile
+    depends_on:
+      - trust-plane
+    command: start-dev --import-realm --features=token-exchange,admin-fine-grained-authz
+    ports:
+      - "8180:8080"
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/pic-demo-realm.json:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - pic-spi-network
+
+networks:
+  pic-spi-network:
+    driver: bridge

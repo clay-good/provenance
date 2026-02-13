@@ -1,0 +1,208 @@
+{
+  "id": "pic-demo",
+  "realm": "pic-demo",
+  "displayName": "PIC Demo (SPI)",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": false,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": false,
+  "requiredCredentials": ["password"],
+  "defaultSignatureAlgorithm": "RS256",
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+
+  "attributes": {
+    "pic_enabled": "true",
+    "pic_trust_plane_url": "http://trust-plane:8080",
+    "pic_fail_open": "false",
+    "pic_ops_user_attribute": "pic_ops",
+    "pic_audit_enabled": "true",
+    "pic_max_act_depth": "32",
+    "pic_token_lifetime_seconds": "300"
+  },
+
+  "roles": {
+    "realm": [
+      {
+        "name": "pic-scope-alice",
+        "description": "Grants access to Alice's PIC claims scopes (read + write)"
+      },
+      {
+        "name": "pic-scope-bob",
+        "description": "Grants access to Bob's PIC claims scopes (read-only)"
+      }
+    ]
+  },
+
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "email": "alice@pic-demo.local",
+      "firstName": "Alice",
+      "lastName": "Demo",
+      "emailVerified": true,
+      "attributes": {
+        "pic_ops": ["read:claims:alice/*", "write:claims:alice/*"]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "alice123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "pic-scope-alice"
+      ]
+    },
+    {
+      "username": "bob",
+      "enabled": true,
+      "email": "bob@pic-demo.local",
+      "firstName": "Bob",
+      "lastName": "Demo",
+      "emailVerified": true,
+      "attributes": {
+        "pic_ops": ["read:claims:bob/*"]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "bob123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "pic-scope-bob"
+      ]
+    }
+  ],
+
+  "clients": [
+    {
+      "clientId": "pic-gateway",
+      "name": "PIC Gateway",
+      "description": "Confidential client that performs RFC 8693 token exchange. The PIC SPI intercepts the exchange and embeds PIC claims.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": false,
+      "fullScopeAllowed": true,
+      "secret": "pic-gateway-secret",
+      "redirectUris": ["*"],
+      "webOrigins": ["*"],
+      "attributes": {
+        "pic.enabled": "true",
+        "pic.executor.name": "pic-gateway"
+      },
+      "defaultClientScopes": [
+        "pic-operations"
+      ],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "pic-resource-api",
+      "name": "PIC Resource API",
+      "description": "Audience target for token exchange. Represents a downstream resource server.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": true,
+      "consentRequired": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "fullScopeAllowed": true,
+      "secret": "pic-resource-api-secret",
+      "redirectUris": [],
+      "webOrigins": [],
+      "defaultClientScopes": [
+        "pic-operations"
+      ],
+      "optionalClientScopes": []
+    }
+  ],
+
+  "clientScopes": [
+    {
+      "name": "pic-operations",
+      "description": "PIC operations scope. Maps per-user pic_ops attributes to the access token.",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true",
+        "consent.screen.text": "Access to your PIC operations"
+      },
+      "protocolMappers": [
+        {
+          "name": "pic-ops-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "pic_ops",
+            "claim.name": "pic_ops",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "multivalued": "true",
+            "aggregate.attrs": "false"
+          }
+        },
+        {
+          "name": "pic-resource-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "pic-resource-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "username-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "username",
+            "claim.name": "preferred_username",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+
+  "eventsEnabled": false,
+  "eventsListeners": ["jboss-logging"],
+  "adminEventsEnabled": false,
+  "adminEventsDetailsEnabled": false,
+
+  "internationalizationEnabled": false,
+
+  "browserFlow": "browser",
+  "registrationFlow": "registration",
+  "directGrantFlow": "direct grant",
+  "resetCredentialsFlow": "reset credentials",
+  "clientAuthenticationFlow": "clients"
+}
