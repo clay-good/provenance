@@ -354,10 +354,14 @@ public class TrustPlaneClient implements AutoCloseable {
             long latencyMs = System.currentTimeMillis() - startTime;
 
             if (httpResponse.statusCode() >= 200 && httpResponse.statusCode() < 300) {
-                HealthResponse healthResponse = objectMapper.readValue(
-                    httpResponse.body(), HealthResponse.class);
-                return new TrustPlaneStatus(true, healthResponse.status,
-                                           healthResponse.version, latencyMs);
+                try {
+                    HealthResponse healthResponse = objectMapper.readValue(
+                        httpResponse.body(), HealthResponse.class);
+                    return new TrustPlaneStatus(true, healthResponse.status,
+                                               healthResponse.version, latencyMs);
+                } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+                    return new TrustPlaneStatus(false, "invalid_response", null, latencyMs);
+                }
             } else {
                 return new TrustPlaneStatus(false, "unhealthy", null, latencyMs);
             }

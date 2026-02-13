@@ -17,7 +17,7 @@
 # - curl, jq
 #
 
-set -e
+set -eo pipefail
 
 # Colors for output
 RED='\033[0;31m'
@@ -221,33 +221,52 @@ ADMIN_TOKEN=$(curl -sf -X POST "${KEYCLOAK_URL}/realms/master/protocol/openid-co
 if [ -n "$ADMIN_TOKEN" ] && [ "$ADMIN_TOKEN" != "null" ]; then
     # Get client UUIDs
     RESOURCE_API_UUID=$(curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" \
-        "${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/clients?clientId=pic-resource-api" | jq -r '.[0].id')
+        "${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/clients?clientId=pic-resource-api" | jq -r '.[0].id // empty')
     GATEWAY_UUID=$(curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" \
-        "${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/clients?clientId=pic-gateway" | jq -r '.[0].id')
+        "${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/clients?clientId=pic-gateway" | jq -r '.[0].id // empty')
     REALM_MGMT_UUID=$(curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" \
-        "${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/clients?clientId=realm-management" | jq -r '.[0].id')
+        "${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/clients?clientId=realm-management" | jq -r '.[0].id // empty')
+
+    if [ -z "$RESOURCE_API_UUID" ] || [ -z "$GATEWAY_UUID" ] || [ -z "$REALM_MGMT_UUID" ]; then
+        echo -e "  ${YELLOW}WARNING: Could not resolve client UUIDs (realm may still be importing). Retrying in 5s...${NC}"
+        sleep 5
+        RESOURCE_API_UUID=$(curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" \
+            "${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/clients?clientId=pic-resource-api" | jq -r '.[0].id // empty')
+        GATEWAY_UUID=$(curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" \
+            "${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/clients?clientId=pic-gateway" | jq -r '.[0].id // empty')
+        REALM_MGMT_UUID=$(curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" \
+            "${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/clients?clientId=realm-management" | jq -r '.[0].id // empty')
+    fi
+
+    if [ -z "$RESOURCE_API_UUID" ] || [ -z "$GATEWAY_UUID" ] || [ -z "$REALM_MGMT_UUID" ]; then
+        echo -e "  ${RED}ERROR: Could not resolve client UUIDs after retry${NC}"
+        echo "    RESOURCE_API_UUID=$RESOURCE_API_UUID"
+        echo "    GATEWAY_UUID=$GATEWAY_UUID"
+        echo "    REALM_MGMT_UUID=$REALM_MGMT_UUID"
+        exit 1
+    fi
 
     # Enable permissions on pic-resource-api (creates token-exchange scope permission)
     PERMS=$(curl -sf -X PUT -H "Authorization: Bearer $ADMIN_TOKEN" \
         -H "Content-Type: application/json" \
         "${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/clients/${RESOURCE_API_UUID}/management/permissions" \
         -d '{"enabled": true}')
-    TOKEN_EXCHANGE_PERM_ID=$(echo "$PERMS" | jq -r '.scopePermissions["token-exchange"]')
+    TOKEN_EXCHANGE_PERM_ID=$(echo "$PERMS" | jq -r '.scopePermissions["token-exchange"] // empty')
 
     # Create a client policy allowing pic-gateway
     POLICY_ID=$(curl -sf -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
         -H "Content-Type: application/json" \
         "${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/clients/${REALM_MGMT_UUID}/authz/resource-server/policy/client" \
         -d "{\"name\":\"pic-gateway-exchange-policy\",\"logic\":\"POSITIVE\",\"decisionStrategy\":\"UNANIMOUS\",\"clients\":[\"${GATEWAY_UUID}\"]}" \
-        | jq -r '.id')
+        | jq -r '.id // empty')
 
     # Get the resource and scope IDs from the permission
     RESOURCE_ID=$(curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" \
         "${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/clients/${REALM_MGMT_UUID}/authz/resource-server/permission/scope/${TOKEN_EXCHANGE_PERM_ID}/resources" \
-        | jq -r '.[0]._id')
+        | jq -r '.[0]._id // empty')
     SCOPE_ID=$(curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" \
         "${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/clients/${REALM_MGMT_UUID}/authz/resource-server/permission/scope/${TOKEN_EXCHANGE_PERM_ID}/scopes" \
-        | jq -r '.[0].id')
+        | jq -r '.[0].id // empty')
 
     # Associate the policy with the token-exchange permission
     curl -sf -X PUT -H "Authorization: Bearer $ADMIN_TOKEN" \
@@ -336,8 +355,7 @@ echo -e "${BOLD}Expected: pic+jwt with pic_provenance, pic_ops, pic_chain claims
 echo ""
 
 echo -e "${CYAN}Step 2a: Authenticate Alice with Keycloak (Direct Grant)...${NC}"
-ALICE_TOKEN_RESPONSE=$(keycloak_login "alice" "alice123")
-if [ $? -ne 0 ] || [ -z "$ALICE_TOKEN_RESPONSE" ]; then
+if ! ALICE_TOKEN_RESPONSE=$(keycloak_login "alice" "alice123") || [ -z "$ALICE_TOKEN_RESPONSE" ]; then
     echo -e "${RED}ERROR: Failed to authenticate Alice with Keycloak${NC}"
     echo "Check Keycloak logs: docker compose logs keycloak"
     exit 1
@@ -374,8 +392,13 @@ if [ -n "$PIC_ERROR" ]; then
     exit 1
 fi
 
-ISSUED_TOKEN_TYPE=$(echo "$PIC_RESPONSE" | jq -r '.issued_token_type')
-PIC_TOKEN=$(echo "$PIC_RESPONSE" | jq -r '.access_token')
+ISSUED_TOKEN_TYPE=$(echo "$PIC_RESPONSE" | jq -r '.issued_token_type // empty')
+PIC_TOKEN=$(echo "$PIC_RESPONSE" | jq -r '.access_token // empty')
+if [ -z "$PIC_TOKEN" ] || [ "$PIC_TOKEN" = "null" ]; then
+    echo -e "${RED}ERROR: Failed to extract PIC token from exchange response${NC}"
+    echo "$PIC_RESPONSE" | jq . 2>/dev/null
+    exit 1
+fi
 echo "  issued_token_type: ${ISSUED_TOKEN_TYPE}"
 echo ""
 
@@ -489,7 +512,12 @@ if [ -n "$NARROW_ERROR" ]; then
     exit 1
 fi
 
-NARROW_TOKEN=$(echo "$NARROW_RESPONSE" | jq -r '.access_token')
+NARROW_TOKEN=$(echo "$NARROW_RESPONSE" | jq -r '.access_token // empty')
+if [ -z "$NARROW_TOKEN" ] || [ "$NARROW_TOKEN" = "null" ]; then
+    echo -e "${RED}ERROR: Failed to extract narrowed PIC token from exchange response${NC}"
+    echo "$NARROW_RESPONSE" | jq . 2>/dev/null
+    exit 1
+fi
 NARROW_PAYLOAD=$(decode_jwt_payload "$NARROW_TOKEN")
 NARROW_OPS=$(echo "$NARROW_PAYLOAD" | jq '.pic_ops' 2>/dev/null)
 
@@ -574,7 +602,7 @@ echo ""
 echo -e "${CYAN}Introspecting the PIC token from Scenario 2...${NC}"
 echo ""
 
-BASIC_AUTH=$(printf '%s:%s' "${KEYCLOAK_CLIENT_ID}" "${KEYCLOAK_CLIENT_SECRET}" | base64 | tr -d '\n')
+BASIC_AUTH=$(printf '%s:%s' "${KEYCLOAK_CLIENT_ID}" "${KEYCLOAK_CLIENT_SECRET}" | base64 | tr -d '\n\r')
 INTROSPECT_RESPONSE=$(curl -sf -X POST "${KEYCLOAK_PIC_BASE}/introspect" \
     -H "Authorization: Basic ${BASIC_AUTH}" \
     -H "Content-Type: application/x-www-form-urlencoded" \
@@ -707,5 +735,5 @@ echo "  docker compose logs trust-plane"
 echo "  docker compose logs keycloak"
 echo ""
 
-# Wait for user to stop
-wait
+# Block until user presses Ctrl+C (triggers cleanup trap)
+while true; do sleep 1; done

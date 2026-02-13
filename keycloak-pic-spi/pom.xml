@@ -14,7 +14,7 @@
 
     <properties>
         <java.version>17</java.version>
-        <keycloak.version>26.5.3</keycloak.version>
+        <keycloak.version>26.0.0</keycloak.version>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -78,7 +78,7 @@
         <dependency>
             <groupId>org.assertj</groupId>
             <artifactId>assertj-core</artifactId>
-            <version>3.27.7</version>
+            <version>3.25.3</version>
             <scope>test</scope>
         </dependency>
         <dependency>

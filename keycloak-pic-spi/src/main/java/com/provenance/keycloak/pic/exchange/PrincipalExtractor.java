@@ -95,7 +95,15 @@ public class PrincipalExtractor {
             );
         }
 
-        // Step 4: Build principal identifier
+        // Step 4: Validate issuer
+        if (issuer == null || issuer.isBlank()) {
+            throw new PicExchangeException(
+                PicExchangeException.ErrorCode.MISSING_PRINCIPAL,
+                "Cannot build principal identifier: token issuer (iss) is null or blank"
+            );
+        }
+
+        // Step 5: Build principal identifier
         String principalId = String.format(PicConstants.PRINCIPAL_FORMAT_OIDC, issuer, subject);
 
         return new PrincipalInfo(subject, principalId, PicConstants.PRINCIPAL_TYPE_OIDC);

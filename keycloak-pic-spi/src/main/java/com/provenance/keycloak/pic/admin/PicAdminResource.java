@@ -90,7 +90,7 @@ public class PicAdminResource {
      * realm attribute keys to their values.
      *
      * @param attributes the PIC configuration attributes to update
-     * @return 204 No Content on success
+     * @return 200 OK with the updated configuration
      */
     @PUT
     @Path("config")
@@ -105,16 +105,19 @@ public class PicAdminResource {
                     .build();
         }
 
-        // Only allow pic_ prefixed attributes to be set via this endpoint
-        for (Map.Entry<String, String> entry : attributes.entrySet()) {
-            String key = entry.getKey();
+        // Validate ALL keys before setting any — ensures atomicity
+        for (String key : attributes.keySet()) {
             if (!key.startsWith("pic_")) {
                 return Response.status(Response.Status.BAD_REQUEST)
                         .entity(errorJson("invalid_request",
                                 "Only pic_ prefixed attributes are allowed: " + key))
                         .build();
             }
-            realm.setAttribute(key, entry.getValue());
+        }
+
+        // All keys validated — now set them
+        for (Map.Entry<String, String> entry : attributes.entrySet()) {
+            realm.setAttribute(entry.getKey(), entry.getValue());
         }
 
         LOG.infov("PIC config updated for realm {0} by admin", realm.getName());

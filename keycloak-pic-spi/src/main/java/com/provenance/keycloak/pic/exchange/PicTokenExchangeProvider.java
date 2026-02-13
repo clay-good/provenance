@@ -168,7 +168,7 @@ public class PicTokenExchangeProvider implements TokenExchangeProvider {
             LOG.warnv(e, "Failed to validate subject token in realm {0}", realm.getName());
             throw new CorsErrorResponseException(context.getCors(),
                 "invalid_grant",
-                "Subject token validation failed: " + e.getMessage(),
+                "Subject token validation failed",
                 Response.Status.BAD_REQUEST);
         }
 
@@ -542,7 +542,7 @@ public class PicTokenExchangeProvider implements TokenExchangeProvider {
             principalInfo.type(),
             principalInfo.principalId(),
             pcaResult.pcaHash(),
-            pcaResult.getOps().isEmpty() ? "" : extractCatKid(pcaResult),
+            extractCatKid(pcaResult),
             pcaResult.getHop(),
             realmConfig.getTrustPlaneUrl()
         );
@@ -629,7 +629,15 @@ public class PicTokenExchangeProvider implements TokenExchangeProvider {
         AccessToken standardToken = new AccessToken();
         standardToken.id(UUID.randomUUID().toString());
         standardToken.issuer(getRealmIssuer(realm));
-        standardToken.subject(subjectAccessToken.getSubject());
+        // Use same null-fallback pattern as buildPicTokenResponse
+        String subject = subjectAccessToken.getSubject();
+        if (subject == null) {
+            Map<String, Object> otherClaims = subjectAccessToken.getOtherClaims();
+            if (otherClaims != null && otherClaims.get("sub") instanceof String sub) {
+                subject = sub;
+            }
+        }
+        standardToken.subject(subject);
 
         long now = System.currentTimeMillis() / 1000;
         int lifetimeSeconds = realmConfig.getTokenLifetimeSeconds();

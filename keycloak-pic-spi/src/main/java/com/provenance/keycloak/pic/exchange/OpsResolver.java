@@ -142,6 +142,9 @@ public class OpsResolver {
 
         List<String> result = new ArrayList<>();
         for (String requested : requestedOps) {
+            if (requested == null || requested.isBlank()) {
+                continue;
+            }
             if (opIsCovered(requested, authorizedOps)) {
                 result.add(requested);
             }
@@ -167,7 +170,14 @@ public class OpsResolver {
      * @return true if the operation is covered by at least one authorized op
      */
     public boolean opIsCovered(String op, List<String> authorizedOps) {
+        if (op == null || op.isBlank()) {
+            return false;
+        }
         for (String allowed : authorizedOps) {
+            if (allowed == null) {
+                continue;
+            }
+
             // Universal wildcard covers everything
             if ("*".equals(allowed)) {
                 return true;

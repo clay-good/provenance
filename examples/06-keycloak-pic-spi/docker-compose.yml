@@ -17,7 +17,8 @@ services:
       context: ../../keycloak-pic-spi
       dockerfile: Dockerfile
     depends_on:
-      - trust-plane
+      trust-plane:
+        condition: service_healthy
     command: start-dev --import-realm --features=token-exchange,admin-fine-grained-authz
     ports:
       - "8180:8080"

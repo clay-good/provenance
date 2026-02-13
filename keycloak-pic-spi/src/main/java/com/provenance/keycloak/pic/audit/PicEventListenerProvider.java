@@ -255,9 +255,13 @@ public class PicEventListenerProvider implements EventListenerProvider {
             isPicRelevant = repr.contains("\"pic_") || repr.contains("\"pic.");
         }
 
-        // Also check resource path for user attribute changes
-        if (!isPicRelevant && resourcePath.contains("/users/") && resourcePath.contains("/attributes")) {
-            isPicRelevant = true;
+        // Also check resource path for user attribute changes — but only if
+        // the representation mentions pic_ops (avoid over-broad matching)
+        if (!isPicRelevant && resourcePath.contains("/users/")) {
+            if (includeRepresentation && event.getRepresentation() != null
+                    && event.getRepresentation().contains("pic_ops")) {
+                isPicRelevant = true;
+            }
         }
 
         if (!isPicRelevant) {
@@ -335,9 +339,8 @@ public class PicEventListenerProvider implements EventListenerProvider {
         }
 
         // If it looks like a JSON array, parse it
-        if (opsStr.startsWith("[")) {
+        if (opsStr.startsWith("[") && opsStr.endsWith("]")) {
             try {
-                // Simple JSON array parsing (reuse OpsResolver logic)
                 String inner = opsStr.substring(1, opsStr.length() - 1).trim();
                 if (inner.isEmpty()) {
                     return java.util.List.of();
@@ -358,12 +361,19 @@ public class PicEventListenerProvider implements EventListenerProvider {
                 }
                 return ops;
             } catch (Exception e) {
+                LOG.warnv("Failed to parse PIC ops as JSON array: {0}", opsStr);
                 // Fall through to space-delimited parsing
             }
         }
 
-        // Space-delimited
-        return java.util.List.of(opsStr.split("\\s+"));
+        // Space-delimited — filter out empty strings from split
+        java.util.List<String> ops = new java.util.ArrayList<>();
+        for (String part : opsStr.split("\\s+")) {
+            if (!part.isEmpty()) {
+                ops.add(part);
+            }
+        }
+        return ops;
     }
 
     /**
