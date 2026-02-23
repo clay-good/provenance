@@ -420,6 +420,11 @@ provenance/
 │   ├── provenance-core/      # Core types and crypto
 │   ├── provenance-plane/     # Trust Plane server
 │   └── provenance-bridge/    # Federation bridge
+├── keycloak-pic-spi/         # Keycloak SPI (Java 17, Maven)
+│   ├── src/main/java/        # 23 implementation classes
+│   ├── src/test/java/        # 20 test classes
+│   ├── pom.xml               # Keycloak 26.0, Java 17
+│   └── Dockerfile            # Multi-stage production build
 ├── sdks/
 │   └── typescript/           # TypeScript SDK
 ├── examples/
@@ -427,7 +432,8 @@ provenance/
 │   ├── 02-ai-agent-insurance/
 │   ├── 03-keycloak-oauth-exchange/
 │   ├── 04-kafka-authority/
-│   └── 05-federation/
+│   ├── 05-federation/
+│   └── 06-keycloak-pic-spi/  # Server-side PIC demo
 └── deploy/
     └── docker/               # Docker deployment
 ```
@@ -655,6 +661,286 @@ cd examples/06-keycloak-pic-spi
 | Audit trail | Inspect pic_chain | hop=0, executor, pca_hash, cat_kid |
 
 **Key insight**: PIC works transparently at the IdP level. Standard OAuth clients get authority continuity without any code changes — the Keycloak SPI does everything.
+
+---
+
+## Keycloak PIC SPI — Deep Dive
+
+The Keycloak PIC SPI is a server-side integration that embeds PIC authority continuity directly into Keycloak's OAuth 2.0 Token Exchange (RFC 8693). Instead of requiring every service to integrate a PIC SDK and contact the Trust Plane independently, the Identity Provider itself enforces all three PIC invariants during token exchange. The result is a self-contained `pic+jwt` token that carries provenance, scoped operations, and a cryptographic audit trail — no client-side changes needed.
+
+### How It Works — System Design
+
+```
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│                         KEYCLOAK PIC SPI — TOKEN EXCHANGE FLOW                   │
+│                                                                                  │
+│                                                                                  │
+│  ┌──────────┐          ┌──────────────────────────────────────┐          ┌──────────────┐
+│  │          │    1     │              KEYCLOAK 26.0            │    3     │              │
+│  │  OAuth   │ ────────►│                                      │ ────────►│  Trust Plane │
+│  │  Client  │  POST    │  ┌────────────────────────────────┐  │  POST    │   (Rust)     │
+│  │          │  /token   │  │        PIC SPI (Java)          │  │  /v1/    │              │
+│  │          │          │  │                                │  │  pca/    │  Enforces:   │
+│  │          │          │  │  ┌──────────┐ ┌─────────────┐  │  │  issue   │  - p_0       │
+│  │          │          │  │  │Principal │ │ OpsResolver │  │  │         │    immutable  │
+│  │          │          │  │  │Extractor │ │(intersection│  │  │         │  - ops ⊆     │
+│  │          │          │  │  │(p_0 from │ │ + wildcard) │  │  │         │    predecessor│
+│  │          │          │  │  │act chain)│ │             │  │  │         │  - Signs PCA │
+│  │          │          │  │  └──────────┘ └─────────────┘  │  │         │              │
+│  │          │          │  │  ┌──────────┐ ┌─────────────┐  │  │         │              │
+│  │          │          │  │  │TrustPlane│ │ Audit Event │  │  │         │              │
+│  │          │    4     │  │  │ Client   │ │  Listener   │  │  │    4    │              │
+│  │          │ ◄────────│  │  │(HTTP)    │ │(PIC events) │  │  │ ◄───────│              │
+│  │          │  pic+jwt │  │  └──────────┘ └─────────────┘  │  │  PCA    │              │
+│  │          │          │  └────────────────────────────────┘  │  signed  │              │
+│  └──────────┘          │                                      │         └──────────────┘
+│                        │  ┌────────────────────────────────┐  │
+│                        │  │   Additional SPI Components     │  │
+│                        │  │                                │  │
+│                        │  │  • PicRealmResource             │  │
+│                        │  │    GET /pic/well-known          │  │
+│                        │  │    POST /pic/introspect         │  │
+│                        │  │                                │  │
+│                        │  │  • PicAdminResource             │  │
+│                        │  │    Key mgmt, config updates     │  │
+│                        │  │                                │  │
+│                        │  │  • PicOpsProtocolMapper         │  │
+│                        │  │    Maps user attrs → pic_ops    │  │
+│                        │  └────────────────────────────────┘  │
+│                        └──────────────────────────────────────┘
+│                                                                                  │
+│  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  │
+│                                                                                  │
+│  STEP-BY-STEP FLOW:                                                              │
+│                                                                                  │
+│  1. Client sends RFC 8693 token exchange request to Keycloak:                    │
+│     POST /realms/{realm}/protocol/openid-connect/token                           │
+│       grant_type=urn:ietf:params:oauth:grant-type:token-exchange                 │
+│       subject_token=<alice's JWT>                                                │
+│       requested_token_type=urn:ietf:params:oauth:token-type:pic_token            │
+│       scope=read:claims:alice/*                                                  │
+│                                                                                  │
+│  2. PIC SPI intercepts the exchange (supports() returns true) and:               │
+│     a. Extracts p_0 from the subject token's act claim chain                     │
+│     b. Loads Alice's authorized ops from user attribute (pic_ops)                │
+│     c. Computes effective ops = intersection(authorized, requested)              │
+│     d. If intersection is empty → 403 (confused deputy BLOCKED)                 │
+│                                                                                  │
+│  3. SPI calls Trust Plane to issue a PCA (Proof of Causal Authority):            │
+│     POST /v1/pca/issue { credential, ops, executor_binding }                     │
+│     Trust Plane validates invariants, signs the PCA, returns it                  │
+│                                                                                  │
+│  4. SPI builds a pic+jwt response containing:                                    │
+│     • pic_provenance: { p_0, pca_0_hash, cat_kid, hop, trust_plane }            │
+│     • pic_ops: [ effective operations ]                                          │
+│     • pic_chain: [ { hop, executor, ops, pca_hash, cat_kid } ]                  │
+│     Signs with Keycloak's realm key (JOSE header typ: "pic+jwt")                │
+│                                                                                  │
+│  5. Client receives a self-contained pic+jwt — no separate PCA header needed     │
+│                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Multi-Hop Token Exchange (Service-to-Service Delegation)
+
+When a service receives a `pic+jwt` and needs to delegate further, the SPI detects the predecessor PCA and calls `processPoc()` instead of `issuePca()`, extending the chain:
+
+```
+┌──────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  Alice   │     │   Service A  │     │   Service B  │     │   Database   │
+│ (human)  │     │   (hop 0)    │     │   (hop 1)    │     │   (hop 2)    │
+└────┬─────┘     └──────┬───────┘     └──────┬───────┘     └──────┬───────┘
+     │                  │                    │                    │
+     │  1. Login +      │                    │                    │
+     │  token exchange  │                    │                    │
+     │ ────────────────►│                    │                    │
+     │                  │                    │                    │
+     │  pic+jwt         │                    │                    │
+     │  p_0=alice       │                    │                    │
+     │  ops=[r:*,w:*]   │                    │                    │
+     │ ◄────────────────│                    │                    │
+     │                  │                    │                    │
+     │                  │  2. Re-exchange    │                    │
+     │                  │  pic+jwt (hop 0)   │                    │
+     │                  │  scope=r:alice/*   │                    │
+     │                  │ ──────────────────►│                    │
+     │                  │                    │                    │
+     │                  │  pic+jwt (hop 1)   │                    │
+     │                  │  p_0=alice ◄──── SAME (immutable)      │
+     │                  │  ops=[r:alice/*] ◄─ NARROWED            │
+     │                  │ ◄──────────────────│                    │
+     │                  │                    │                    │
+     │                  │                    │  3. Re-exchange    │
+     │                  │                    │  scope=r:alice/1   │
+     │                  │                    │ ──────────────────►│
+     │                  │                    │                    │
+     │                  │                    │  pic+jwt (hop 2)   │
+     │                  │                    │  p_0=alice ◄── STILL ALICE
+     │                  │                    │  ops=[r:alice/1]◄─ NARROWED AGAIN
+     │                  │                    │ ◄──────────────────│
+     │                  │                    │                    │
+```
+
+At every hop, the PIC invariants guarantee:
+- **p_0 stays Alice** — identity cannot be laundered through token exchange
+- **ops can only shrink** — no service can escalate beyond what it received
+- **chain is cryptographically signed** — every hop is auditable back to the Trust Plane
+
+### SPI Module Architecture
+
+```
+keycloak-pic-spi/
+├── src/main/java/com/provenance/keycloak/pic/
+│   ├── PicConstants.java                  # URNs, claim names, attribute keys
+│   │
+│   ├── exchange/                          # Core token exchange (RFC 8693 + PIC)
+│   │   ├── PicTokenExchangeProvider.java  # Main exchange logic (767 lines)
+│   │   ├── PicTokenExchangeProviderFactory.java  # SPI factory + lifecycle
+│   │   ├── OpsResolver.java              # Operation intersection + wildcards
+│   │   ├── PrincipalExtractor.java       # p_0 from act claim chains
+│   │   └── PicExchangeException.java     # Typed errors → OAuth error codes
+│   │
+│   ├── trustplane/                        # Trust Plane HTTP client
+│   │   ├── TrustPlaneClient.java         # Thread-safe HTTP client
+│   │   ├── PcaIssuanceResult.java        # PCA result DTO + SHA-256 hash
+│   │   ├── TrustPlaneException.java      # Error classification
+│   │   └── TrustPlaneStatus.java         # Health check status
+│   │
+│   ├── resource/                          # Public realm endpoints
+│   │   ├── PicRealmResource.java         # /pic/well-known, /pic/introspect
+│   │   ├── PicRealmResourceProvider.java
+│   │   └── PicRealmResourceProviderFactory.java
+│   │
+│   ├── admin/                             # Admin console endpoints
+│   │   ├── PicAdminResource.java         # Key management, config
+│   │   ├── PicAdminResourceProvider.java
+│   │   └── PicAdminResourceProviderFactory.java
+│   │
+│   ├── audit/                             # PIC event listener
+│   │   ├── PicEventListenerProvider.java  # Audit logging
+│   │   ├── PicEventListenerProviderFactory.java
+│   │   └── PicAuditEvent.java            # Audit event model
+│   │
+│   ├── mapper/                            # Protocol mapper
+│   │   └── PicOpsProtocolMapper.java     # Maps user attrs → pic_ops claim
+│   │
+│   └── model/                             # Data models
+│       ├── PicRealmConfig.java           # Realm configuration
+│       ├── PicProvenanceClaim.java       # pic_provenance claim structure
+│       └── PicChainEntry.java            # pic_chain entry structure
+│
+├── src/main/resources/META-INF/services/  # 5 SPI registrations
+│   ├── org.keycloak.protocol.oidc.TokenExchangeProviderFactory
+│   ├── org.keycloak.services.resource.RealmResourceProviderFactory
+│   ├── org.keycloak.services.resources.admin.ext.AdminRealmResourceProviderFactory
+│   ├── org.keycloak.events.EventListenerProviderFactory
+│   └── org.keycloak.protocol.ProtocolMapper
+│
+├── src/test/java/                         # 20 test classes
+│   └── com/provenance/keycloak/pic/
+│       ├── exchange/                      # Unit tests for exchange logic
+│       ├── trustplane/                    # Trust Plane client tests
+│       ├── resource/                      # Endpoint tests
+│       ├── admin/                         # Admin endpoint tests
+│       ├── audit/                         # Audit tests
+│       ├── mapper/                        # Mapper tests
+│       ├── model/                         # Model tests
+│       └── integration/                   # Full E2E with Testcontainers
+│
+├── pom.xml                                # Maven build (Keycloak 26.0, Java 17)
+└── Dockerfile                             # Multi-stage production build
+```
+
+### Client-Side vs Server-Side PIC
+
+This diagram shows why the Keycloak SPI approach is preferred for most deployments:
+
+```
+BEFORE (Client-Side PIC — Example 03):          AFTER (Server-Side PIC — Example 06):
+
+┌─────────┐  ┌─────────┐  ┌─────────┐          ┌─────────┐  ┌─────────┐  ┌─────────┐
+│Service A│  │Service B│  │Service C│          │Service A│  │Service B│  │Service C│
+│         │  │         │  │         │          │         │  │         │  │         │
+│ PIC SDK │  │ PIC SDK │  │ PIC SDK │          │ (no PIC │  │ (no PIC │  │ (no PIC │
+│ ┌─────┐ │  │ ┌─────┐ │  │ ┌─────┐ │          │  code)  │  │  code)  │  │  code)  │
+│ │Trust│ │  │ │Trust│ │  │ │Trust│ │          │         │  │         │  │         │
+│ │Plane│ │  │ │Plane│ │  │ │Plane│ │          └────┬────┘  └────┬────┘  └────┬────┘
+│ │Call │ │  │ │Call │ │  │ │Call │ │               │            │            │
+│ └──┬──┘ │  │ └──┬──┘ │  │ └──┬──┘ │               │            │            │
+└────┼────┘  └────┼────┘  └────┼────┘               │            │            │
+     │            │            │               ┌─────┴────────────┴────────────┴─────┐
+     │            │            │               │                                     │
+     ▼            ▼            ▼               │        KEYCLOAK + PIC SPI           │
+┌────────────────────────────────┐             │                                     │
+│         Trust Plane            │             │  Single integration point:           │
+│  (3 separate connections)      │             │  SPI calls Trust Plane once          │
+└────────────────────────────────┘             │  per token exchange                  │
+                                               │                                     │
+Every service needs PIC SDK,                   └──────────────┬──────────────────────┘
+config, Trust Plane connection.                               │
+N services = N integrations.                                  ▼
+                                               ┌────────────────────────────────┐
+                                               │         Trust Plane            │
+                                               │    (1 connection from SPI)     │
+                                               └────────────────────────────────┘
+
+                                               Zero service code changes.
+                                               1 SPI JAR = PIC for all services.
+```
+
+### Security Model
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                    PIC SECURITY GUARANTEES                            │
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  INVARIANT 1 — PROVENANCE (p_0 immutability)                        │
+│  ┌─────────────────────────────────────────────────────────┐        │
+│  │  Token exchange: Alice → Service A → Service B          │        │
+│  │                                                         │        │
+│  │  Standard OAuth:  sub=alice → sub=serviceA → sub=svcB   │        │
+│  │                   (identity laundered!)                  │        │
+│  │                                                         │        │
+│  │  PIC SPI:         p_0=alice → p_0=alice → p_0=alice     │        │
+│  │                   (origin ALWAYS traceable)              │        │
+│  └─────────────────────────────────────────────────────────┘        │
+│                                                                      │
+│  INVARIANT 2 — IDENTITY (monotonic ops narrowing)                   │
+│  ┌─────────────────────────────────────────────────────────┐        │
+│  │  Alice's authorized ops: [read:claims:alice/*,           │        │
+│  │                            write:claims:alice/*]         │        │
+│  │                                                         │        │
+│  │  hop 0 → ops=[read:claims:alice/*, write:claims:alice/*]│        │
+│  │  hop 1 → ops=[read:claims:alice/*]          ← narrowed  │        │
+│  │  hop 2 → ops=[read:claims:alice/claim-001]  ← narrowed  │        │
+│  │                                                         │        │
+│  │  BLOCKED: ops=[read:claims:bob/*]  ← not subset of hop0│        │
+│  └─────────────────────────────────────────────────────────┘        │
+│                                                                      │
+│  INVARIANT 3 — CONTINUITY (cryptographic chain)                     │
+│  ┌─────────────────────────────────────────────────────────┐        │
+│  │  pic_chain: [                                           │        │
+│  │    { hop:0, executor:"gateway",  pca_hash:"a3f...",     │        │
+│  │      ops:["r:*","w:*"], cat_kid:"demo-tp" },            │        │
+│  │    { hop:1, executor:"service-a", pca_hash:"7bc...",    │        │
+│  │      ops:["r:alice/*"], cat_kid:"demo-tp" }             │        │
+│  │  ]                                                      │        │
+│  │                                                         │        │
+│  │  Every hop is signed by the Trust Plane (CAT).          │        │
+│  │  Chain cannot be forged, reordered, or tampered with.   │        │
+│  └─────────────────────────────────────────────────────────┘        │
+│                                                                      │
+│  FAIL-CLOSED BY DEFAULT                                             │
+│  ┌─────────────────────────────────────────────────────────┐        │
+│  │  Trust Plane unreachable? → Exchange FAILS (503)        │        │
+│  │  pic_fail_open=true?      → WARNING: issues standard    │        │
+│  │                              JWT without PIC claims      │        │
+│  │                              (development only!)         │        │
+│  └─────────────────────────────────────────────────────────┘        │
+│                                                                      │
+└──────────────────────────────────────────────────────────────────────┘
+```
 
 ### PermGuard Integration Point
 
