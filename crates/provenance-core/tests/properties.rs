@@ -23,7 +23,7 @@ proptest! {
         principal in "[a-z]{3,10}",
         hops in 1..20u32,
     ) {
-        let p_0 = PrincipalIdentifier::oidc(&format!("user:{}", principal));
+        let p_0 = PrincipalIdentifier::oidc(format!("user:{}", principal));
 
         // Create PCA_0
         let pca_0 = PcaBuilder::new()
@@ -71,8 +71,8 @@ proptest! {
     ) {
         prop_assume!(original_principal != attacker_principal);
 
-        let original_p_0 = PrincipalIdentifier::oidc(&format!("user:{}", original_principal));
-        let attacker_p_0 = PrincipalIdentifier::oidc(&format!("user:{}", attacker_principal));
+        let original_p_0 = PrincipalIdentifier::oidc(format!("user:{}", original_principal));
+        let attacker_p_0 = PrincipalIdentifier::oidc(format!("user:{}", attacker_principal));
 
         let pca_0 = PcaBuilder::new()
             .p_0(original_p_0.clone())
@@ -341,7 +341,7 @@ proptest! {
             .collect();
 
         let pca = PcaBuilder::new()
-            .p_0(PrincipalIdentifier::oidc(&format!("user:{}", principal)))
+            .p_0(PrincipalIdentifier::oidc(format!("user:{}", principal)))
             .ops(ops)
             .executor(ExecutorBinding::new().with("service", "test"))
             .build_pca_0()

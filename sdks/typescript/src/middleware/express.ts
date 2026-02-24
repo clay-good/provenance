@@ -153,9 +153,10 @@ export function picMiddleware(options: PicMiddlewareOptions) {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
       // Get incoming PCA from header
-      const pcaHeaderValue = req.headers[pcaHeader.toLowerCase()] as
-        | string
-        | undefined;
+      const rawHeader = req.headers[pcaHeader.toLowerCase()];
+      // Reject array headers (duplicate header sent) to prevent injection
+      const pcaHeaderValue =
+        typeof rawHeader === 'string' ? rawHeader : undefined;
 
       if (!pcaHeaderValue) {
         if (optional) {
@@ -306,9 +307,9 @@ function operationCovers(pattern: string, operation: string): boolean {
     return true;
   }
 
-  // Handle wildcard patterns
-  if (pattern.endsWith(':*')) {
-    const prefix = pattern.slice(0, -1); // Remove '*', keep ':'
+  // Handle wildcard patterns (matches Rust op_is_covered: any trailing '*')
+  if (pattern.endsWith('*')) {
+    const prefix = pattern.slice(0, -1); // Remove '*', keep prefix
     return operation.startsWith(prefix);
   }
 

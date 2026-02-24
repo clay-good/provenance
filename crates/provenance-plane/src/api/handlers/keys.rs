@@ -74,7 +74,8 @@ pub async fn register_executor(
         )));
     }
 
-    let key_bytes: [u8; 32] = key_bytes.try_into().unwrap();
+    let key_bytes: [u8; 32] = key_bytes.try_into()
+        .map_err(|_| ApiError::BadRequest("Invalid key length".into()))?;
 
     // Create PublicKey
     let public_key = PublicKey::from_bytes(&request.kid, &key_bytes).map_err(|e| {

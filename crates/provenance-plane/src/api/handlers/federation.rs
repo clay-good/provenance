@@ -19,7 +19,7 @@ use crate::api::handlers::issue::AppState;
 // =============================================================================
 
 /// Information about this Trust Plane for discovery
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TrustPlaneInfo {
     /// Key ID of this Trust Plane's CAT
     pub kid: String,
@@ -94,6 +94,14 @@ pub async fn register_cat(
     State(state): State<Arc<AppState>>,
     Json(request): Json<RegisterCatRequest>,
 ) -> Result<Json<RegisterCatResponse>, ApiError> {
+    // Validate kid
+    if request.kid.is_empty() {
+        return Err(ApiError::BadRequest("kid must not be empty".into()));
+    }
+    if request.kid.len() > 256 {
+        return Err(ApiError::BadRequest("kid must not exceed 256 characters".into()));
+    }
+
     // Decode public key
     let public_key_bytes = STANDARD.decode(&request.public_key)?;
     if public_key_bytes.len() != 32 {
@@ -102,6 +110,12 @@ pub async fn register_cat(
             public_key_bytes.len()
         )));
     }
+
+    // Parse the public key once (avoids redundant decode)
+    let key_bytes: [u8; 32] = public_key_bytes.clone().try_into()
+        .map_err(|_| ApiError::BadRequest("Invalid key length".into()))?;
+    let public_key = provenance_core::crypto::PublicKey::from_bytes(&request.kid, &key_bytes)
+        .map_err(|e| ApiError::BadRequest(format!("Invalid public key: {}", e)))?;
 
     // Register with storage
     let cat_info = crate::storage::CatInfo {
@@ -118,10 +132,6 @@ pub async fn register_cat(
     })?;
 
     // Also register with in-memory registry for immediate use
-    let mut key_bytes = [0u8; 32];
-    key_bytes.copy_from_slice(&STANDARD.decode(&request.public_key)?);
-    let public_key = provenance_core::crypto::PublicKey::from_bytes(&request.kid, &key_bytes)
-        .map_err(|e| ApiError::BadRequest(format!("Invalid public key: {}", e)))?;
 
     state.registry.register_cat(request.kid.clone(), public_key);
 
@@ -311,8 +321,10 @@ pub async fn verify_federated_pca(
         }));
     }
 
-    // Verify signature
-    let issuer_key = issuer_key.unwrap();
+    // Verify signature (issuer_key is guaranteed Some by the check above)
+    let Some(issuer_key) = issuer_key else {
+        unreachable!("issuer_known check ensures issuer_key is Some");
+    };
     match issuer_key.verify_pca(&signed_pca) {
         Ok(pca) => {
             info!(

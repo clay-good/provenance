@@ -24,6 +24,7 @@ use provenance_plane::KeyRegistry;
 /// In the real flow, the Trust Plane's validate_jwt_credential() extracts:
 /// - p_0 from preferred_username or act.sub chain
 /// - ops from pic_ops claim
+///
 /// This helper creates the equivalent PCA_0 directly for testing the chain.
 fn create_keycloak_pca_0(username: &str, ops: Vec<String>) -> Pca {
     let principal = format!("http://localhost:8180/realms/pic-demo#{}", username);

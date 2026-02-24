@@ -184,6 +184,16 @@ mod tests {
     }
 
     #[test]
+    fn test_monotonicity_empty_predecessor_rejects_any_successor() {
+        let pred: Vec<String> = vec![];
+        let succ = vec!["read:claims:*".into()];
+
+        // Empty predecessor cannot authorize anything
+        let err = validate_monotonicity(&pred, &succ).unwrap_err();
+        assert_eq!(err.violating_ops, vec!["read:claims:*"]);
+    }
+
+    #[test]
     fn test_monotonicity_nested_wildcard() {
         let pred = vec!["read:claims:alice/*".into()];
         let succ = vec!["read:claims:alice/doc1".into(), "read:claims:alice/doc2".into()];

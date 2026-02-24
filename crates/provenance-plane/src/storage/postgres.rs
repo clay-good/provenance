@@ -123,8 +123,8 @@ impl KeyStore for PostgresStore {
         .bind(&info.kid)
         .bind(&info.public_key)
         .bind(&info.service_name)
-        .bind(&info.registered_at)
-        .bind(&info.expires_at)
+        .bind(info.registered_at)
+        .bind(info.expires_at)
         .execute(&self.pool)
         .await
         .map_err(|e| {
@@ -207,7 +207,7 @@ impl KeyStore for PostgresStore {
         .bind(&info.public_key)
         .bind(&info.name)
         .bind(&info.endpoint)
-        .bind(&info.registered_at)
+        .bind(info.registered_at)
         .bind(info.is_local)
         .execute(&self.pool)
         .await
@@ -311,7 +311,7 @@ impl KeyStore for PostgresStore {
         .bind(&entry.principal)
         .bind(&entry.reason)
         .bind(&entry.revoked_by)
-        .bind(&entry.revoked_at)
+        .bind(entry.revoked_at)
         .execute(&self.pool)
         .await
         .map_err(|e| {
