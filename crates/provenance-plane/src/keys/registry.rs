@@ -49,7 +49,7 @@ impl KeyRegistry {
 
         // Register our own CAT public key for self-verification
         {
-            let mut cat_keys = registry.cat_keys.write().unwrap();
+            let mut cat_keys = registry.cat_keys.write().unwrap_or_else(|e| e.into_inner());
             cat_keys.insert(cat_kid.clone(), cat_public);
         }
 
@@ -82,7 +82,7 @@ impl KeyRegistry {
     ///
     /// Executors must register their public keys before they can submit PoCs.
     pub fn register_executor(&self, kid: String, key: PublicKey) {
-        let mut executor_keys = self.executor_keys.write().unwrap();
+        let mut executor_keys = self.executor_keys.write().unwrap_or_else(|e| e.into_inner());
         info!(kid = %kid, "Registered executor key");
         executor_keys.insert(kid, key);
     }
@@ -100,19 +100,19 @@ impl KeyRegistry {
 
     /// Get an executor's public key by key ID
     pub fn get_executor(&self, kid: &str) -> Option<PublicKey> {
-        let executor_keys = self.executor_keys.read().unwrap();
+        let executor_keys = self.executor_keys.read().unwrap_or_else(|e| e.into_inner());
         executor_keys.get(kid).cloned()
     }
 
     /// Check if an executor key is registered
     pub fn has_executor(&self, kid: &str) -> bool {
-        let executor_keys = self.executor_keys.read().unwrap();
+        let executor_keys = self.executor_keys.read().unwrap_or_else(|e| e.into_inner());
         executor_keys.contains_key(kid)
     }
 
     /// Remove an executor's public key
     pub fn unregister_executor(&self, kid: &str) -> bool {
-        let mut executor_keys = self.executor_keys.write().unwrap();
+        let mut executor_keys = self.executor_keys.write().unwrap_or_else(|e| e.into_inner());
         let removed = executor_keys.remove(kid).is_some();
         if removed {
             info!(kid = %kid, "Unregistered executor key");
@@ -122,13 +122,13 @@ impl KeyRegistry {
 
     /// List all registered executor key IDs
     pub fn list_executor_kids(&self) -> Vec<String> {
-        let executor_keys = self.executor_keys.read().unwrap();
+        let executor_keys = self.executor_keys.read().unwrap_or_else(|e| e.into_inner());
         executor_keys.keys().cloned().collect()
     }
 
     /// Get the number of registered executor keys
     pub fn executor_count(&self) -> usize {
-        let executor_keys = self.executor_keys.read().unwrap();
+        let executor_keys = self.executor_keys.read().unwrap_or_else(|e| e.into_inner());
         executor_keys.len()
     }
 
@@ -140,26 +140,26 @@ impl KeyRegistry {
     ///
     /// Used for federation - verifying PCAs signed by other Trust Planes.
     pub fn register_cat(&self, kid: String, key: PublicKey) {
-        let mut cat_keys = self.cat_keys.write().unwrap();
+        let mut cat_keys = self.cat_keys.write().unwrap_or_else(|e| e.into_inner());
         info!(kid = %kid, "Registered CAT key");
         cat_keys.insert(kid, key);
     }
 
     /// Get a CAT's public key by key ID
     pub fn get_cat(&self, kid: &str) -> Option<PublicKey> {
-        let cat_keys = self.cat_keys.read().unwrap();
+        let cat_keys = self.cat_keys.read().unwrap_or_else(|e| e.into_inner());
         cat_keys.get(kid).cloned()
     }
 
     /// Check if a CAT key is registered
     pub fn has_cat(&self, kid: &str) -> bool {
-        let cat_keys = self.cat_keys.read().unwrap();
+        let cat_keys = self.cat_keys.read().unwrap_or_else(|e| e.into_inner());
         cat_keys.contains_key(kid)
     }
 
     /// List all registered CAT key IDs
     pub fn list_cat_kids(&self) -> Vec<String> {
-        let cat_keys = self.cat_keys.read().unwrap();
+        let cat_keys = self.cat_keys.read().unwrap_or_else(|e| e.into_inner());
         cat_keys.keys().cloned().collect()
     }
 

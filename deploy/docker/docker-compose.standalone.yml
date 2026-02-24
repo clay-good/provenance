@@ -9,8 +9,6 @@
 #   curl http://localhost:8080/health
 #   curl http://localhost:8080/ready
 
-version: '3.8'
-
 services:
   trust-plane:
     build:

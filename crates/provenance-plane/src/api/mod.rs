@@ -15,6 +15,28 @@ use tower_http::trace::TraceLayer;
 
 use handlers::AppState;
 
+/// Build CORS layer from TRUST_PLANE_CORS_ORIGINS environment variable.
+///
+/// - If unset or "*", allows any origin (development default).
+/// - Otherwise, comma-separated list of allowed origins.
+fn build_cors_layer() -> CorsLayer {
+    let origins_env = std::env::var("TRUST_PLANE_CORS_ORIGINS").unwrap_or_default();
+
+    let cors = CorsLayer::new()
+        .allow_methods(Any)
+        .allow_headers(Any);
+
+    if origins_env.is_empty() || origins_env == "*" {
+        cors.allow_origin(Any)
+    } else {
+        let origins: Vec<_> = origins_env
+            .split(',')
+            .filter_map(|s| s.trim().parse().ok())
+            .collect();
+        cors.allow_origin(origins)
+    }
+}
+
 /// Health check response
 #[derive(Serialize)]
 pub struct HealthResponse {
@@ -57,11 +79,8 @@ pub async fn ready(State(state): State<Arc<AppState>>) -> Json<ReadyResponse> {
 
 /// Create the API router
 pub fn create_router(state: Arc<AppState>) -> Router {
-    // CORS configuration for browser-based SDKs
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+    // CORS configuration — configurable via TRUST_PLANE_CORS_ORIGINS env var
+    let cors = build_cors_layer();
 
     Router::new()
         // Health endpoints

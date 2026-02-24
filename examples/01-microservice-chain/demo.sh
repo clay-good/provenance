@@ -156,7 +156,7 @@ fi
 echo ""
 
 # -----------------------------------------------------------------------------
-# Scenario 3: Bob tries to upload (write-only user)
+# Scenario 3: Bob tries to upload (read-only user)
 # -----------------------------------------------------------------------------
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${RED}Scenario 3: Bob tries to upload (read-only user)${NC}"

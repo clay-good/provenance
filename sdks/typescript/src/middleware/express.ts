@@ -179,12 +179,6 @@ export function picMiddleware(options: PicMiddlewareOptions) {
         path: req.path,
       };
 
-      // Build PoC
-      const poc = new PocBuilder(pcaHeaderValue)
-        .withOps(ops)
-        .withExecutor(executor)
-        .build();
-
       // Sign PoC
       const signedPoc = await new PocBuilder(pcaHeaderValue)
         .withOps(ops)

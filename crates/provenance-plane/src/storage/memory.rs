@@ -45,19 +45,19 @@ impl KeyStore for MemoryStore {
     // =========================================================================
 
     async fn register_executor(&self, info: ExecutorInfo) -> Result<(), StorageError> {
-        let mut executors = self.executors.write().unwrap();
+        let mut executors = self.executors.write().unwrap_or_else(|e| e.into_inner());
         info!(kid = %info.kid, "Registering executor key");
         executors.insert(info.kid.clone(), info);
         Ok(())
     }
 
     async fn get_executor(&self, kid: &str) -> Result<Option<ExecutorInfo>, StorageError> {
-        let executors = self.executors.read().unwrap();
+        let executors = self.executors.read().unwrap_or_else(|e| e.into_inner());
         Ok(executors.get(kid).cloned())
     }
 
     async fn unregister_executor(&self, kid: &str) -> Result<bool, StorageError> {
-        let mut executors = self.executors.write().unwrap();
+        let mut executors = self.executors.write().unwrap_or_else(|e| e.into_inner());
         let removed = executors.remove(kid).is_some();
         if removed {
             info!(kid = %kid, "Unregistered executor key");
@@ -66,7 +66,7 @@ impl KeyStore for MemoryStore {
     }
 
     async fn list_executors(&self) -> Result<Vec<String>, StorageError> {
-        let executors = self.executors.read().unwrap();
+        let executors = self.executors.read().unwrap_or_else(|e| e.into_inner());
         Ok(executors.keys().cloned().collect())
     }
 
@@ -75,7 +75,7 @@ impl KeyStore for MemoryStore {
     // =========================================================================
 
     async fn register_cat(&self, info: CatInfo) -> Result<(), StorageError> {
-        let mut cats = self.cats.write().unwrap();
+        let mut cats = self.cats.write().unwrap_or_else(|e| e.into_inner());
         info!(
             kid = %info.kid,
             name = ?info.name,
@@ -88,12 +88,12 @@ impl KeyStore for MemoryStore {
     }
 
     async fn get_cat(&self, kid: &str) -> Result<Option<CatInfo>, StorageError> {
-        let cats = self.cats.read().unwrap();
+        let cats = self.cats.read().unwrap_or_else(|e| e.into_inner());
         Ok(cats.get(kid).cloned())
     }
 
     async fn unregister_cat(&self, kid: &str) -> Result<bool, StorageError> {
-        let mut cats = self.cats.write().unwrap();
+        let mut cats = self.cats.write().unwrap_or_else(|e| e.into_inner());
         let removed = cats.remove(kid).is_some();
         if removed {
             info!(kid = %kid, "Unregistered CAT key");
@@ -102,12 +102,12 @@ impl KeyStore for MemoryStore {
     }
 
     async fn list_cats(&self) -> Result<Vec<String>, StorageError> {
-        let cats = self.cats.read().unwrap();
+        let cats = self.cats.read().unwrap_or_else(|e| e.into_inner());
         Ok(cats.keys().cloned().collect())
     }
 
     async fn list_federated_cats(&self) -> Result<Vec<CatInfo>, StorageError> {
-        let cats = self.cats.read().unwrap();
+        let cats = self.cats.read().unwrap_or_else(|e| e.into_inner());
         Ok(cats
             .values()
             .filter(|c| !c.is_local)
@@ -121,12 +121,12 @@ impl KeyStore for MemoryStore {
 
     async fn revoke(&self, entry: RevocationEntry) -> Result<(), StorageError> {
         if let Some(ref principal) = entry.principal {
-            let mut principal_revocations = self.principal_revocations.write().unwrap();
+            let mut principal_revocations = self.principal_revocations.write().unwrap_or_else(|e| e.into_inner());
             info!(principal = %principal, reason = %entry.reason, "Revoking principal");
             principal_revocations.insert(principal.clone(), entry.clone());
         }
 
-        let mut revocations = self.revocations.write().unwrap();
+        let mut revocations = self.revocations.write().unwrap_or_else(|e| e.into_inner());
         info!(
             pca_hash = ?hex::encode(&entry.pca_hash),
             reason = %entry.reason,
@@ -137,22 +137,22 @@ impl KeyStore for MemoryStore {
     }
 
     async fn is_revoked(&self, pca_hash: &[u8]) -> Result<bool, StorageError> {
-        let revocations = self.revocations.read().unwrap();
+        let revocations = self.revocations.read().unwrap_or_else(|e| e.into_inner());
         Ok(revocations.contains_key(pca_hash))
     }
 
     async fn is_principal_revoked(&self, principal: &str) -> Result<bool, StorageError> {
-        let principal_revocations = self.principal_revocations.read().unwrap();
+        let principal_revocations = self.principal_revocations.read().unwrap_or_else(|e| e.into_inner());
         Ok(principal_revocations.contains_key(principal))
     }
 
     async fn get_revocation(&self, pca_hash: &[u8]) -> Result<Option<RevocationEntry>, StorageError> {
-        let revocations = self.revocations.read().unwrap();
+        let revocations = self.revocations.read().unwrap_or_else(|e| e.into_inner());
         Ok(revocations.get(pca_hash).cloned())
     }
 
     async fn list_revocations(&self) -> Result<Vec<RevocationEntry>, StorageError> {
-        let revocations = self.revocations.read().unwrap();
+        let revocations = self.revocations.read().unwrap_or_else(|e| e.into_inner());
         Ok(revocations.values().cloned().collect())
     }
 }

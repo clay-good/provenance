@@ -6,7 +6,7 @@
  */
 
 import * as ed from '@noble/ed25519';
-import { encode, decode, Token, Type } from 'cborg';
+import { encode, decode } from 'cborg';
 import { randomBytes } from 'crypto';
 import type { KeyPair, Poc, SignedPoc } from './types.js';
 
@@ -174,14 +174,10 @@ export async function verifyCoseSign1(
   publicKey: Uint8Array
 ): Promise<Uint8Array> {
   // Decode the COSE_Sign1 structure
-  // Use tag decoder to handle CBOR tag 18
-  let tagValue: number | undefined;
+  // Use tag decoder to handle CBOR tag 18 (unwrap tagged values transparently)
   const decoded = decode(coseSign1Bytes, {
     tags: {
-      [COSE_SIGN1_TAG]: (value: unknown) => {
-        tagValue = COSE_SIGN1_TAG;
-        return value;
-      },
+      [COSE_SIGN1_TAG]: (value: unknown) => value,
     },
   } as { tags: Record<number, (value: unknown) => unknown> });
 

@@ -119,14 +119,26 @@ pub async fn issue_pca(
         .ops(granted_ops.clone())
         .executor(executor);
 
-    // Add temporal constraints - always use 1 hour for now
-    // TODO: Parse expiration from credential and use it if earlier
-    let _ = &expiration; // Mark as used
-    builder = builder.temporal_constraints(
-        TemporalConstraints::new()
+    // Add temporal constraints: use the earlier of credential expiration or 1 hour
+    let default_duration = chrono::Duration::hours(1);
+    let temporal = match &expiration {
+        Some(exp_str) => {
+            let effective = chrono::DateTime::parse_from_rfc3339(exp_str)
+                .ok()
+                .map(|exp| {
+                    let remaining = exp.signed_duration_since(chrono::Utc::now());
+                    if remaining < default_duration { remaining } else { default_duration }
+                })
+                .unwrap_or(default_duration);
+            TemporalConstraints::new()
+                .issued_now()
+                .expires_in(effective)
+        }
+        None => TemporalConstraints::new()
             .issued_now()
-            .expires_in(chrono::Duration::hours(1)),
-    );
+            .expires_in(default_duration),
+    };
+    builder = builder.temporal_constraints(temporal);
 
     let pca = builder.build_pca_0().map_err(|e| {
         ApiError::Internal(format!("Failed to build PCA: {}", e))

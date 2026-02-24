@@ -38,7 +38,7 @@ const LOG_LEVEL = process.env.LOG_LEVEL ?? 'info';
 // Keycloak OAuth client credentials (from realm-export.json)
 const KEYCLOAK_REALM = 'pic-demo';
 const KEYCLOAK_CLIENT_ID = 'pic-gateway';
-const KEYCLOAK_CLIENT_SECRET = 'pic-gateway-secret';
+const KEYCLOAK_CLIENT_SECRET = process.env.KEYCLOAK_CLIENT_SECRET ?? 'pic-gateway-secret';
 const KEYCLOAK_AUDIENCE = 'pic-resource-api';
 
 const KEYCLOAK_TOKEN_URL = `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token`;

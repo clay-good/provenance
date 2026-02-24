@@ -106,13 +106,13 @@ impl InMemoryApiKeyBackend {
 
     /// Register an API key
     pub fn register_key(&self, api_key: impl Into<String>, info: ApiKeyInfo) {
-        let mut keys = self.keys.write().unwrap();
+        let mut keys = self.keys.write().unwrap_or_else(|e| e.into_inner());
         keys.insert(api_key.into(), info);
     }
 
     /// Revoke an API key
     pub fn revoke_key(&self, api_key: &str) -> bool {
-        let mut keys = self.keys.write().unwrap();
+        let mut keys = self.keys.write().unwrap_or_else(|e| e.into_inner());
         if let Some(info) = keys.get_mut(api_key) {
             info.active = false;
             true
@@ -123,13 +123,13 @@ impl InMemoryApiKeyBackend {
 
     /// Remove an API key
     pub fn remove_key(&self, api_key: &str) -> bool {
-        let mut keys = self.keys.write().unwrap();
+        let mut keys = self.keys.write().unwrap_or_else(|e| e.into_inner());
         keys.remove(api_key).is_some()
     }
 
     /// List all key IDs
     pub fn list_keys(&self) -> Vec<String> {
-        let keys = self.keys.read().unwrap();
+        let keys = self.keys.read().unwrap_or_else(|e| e.into_inner());
         keys.keys().cloned().collect()
     }
 }
@@ -143,7 +143,7 @@ impl Default for InMemoryApiKeyBackend {
 #[async_trait]
 impl ApiKeyBackend for InMemoryApiKeyBackend {
     async fn validate(&self, api_key: &str) -> Result<ApiKeyInfo> {
-        let keys = self.keys.read().unwrap();
+        let keys = self.keys.read().unwrap_or_else(|e| e.into_inner());
 
         let info = keys.get(api_key)
             .ok_or(BridgeError::ApiKeyNotFound)?;

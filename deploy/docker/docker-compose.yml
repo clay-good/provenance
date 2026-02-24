@@ -15,8 +15,6 @@
 #   - agent: AI agent service (internal)
 #   - claims: Claims storage backend (port 3001)
 
-version: '3.8'
-
 services:
   # ===========================================================================
   # Trust Plane - CAT (Causal Authority Transition) Service
@@ -81,7 +79,7 @@ services:
   # ===========================================================================
   # Validates PCA before returning claims data
   claims:
-    build: ../../examples/02-ai-agent-insurance/services
+    build: ../../examples/02-ai-agent-insurance/claims-service
     ports:
       - "3001:3001"
     environment:
